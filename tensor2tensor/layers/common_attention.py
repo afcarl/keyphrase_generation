@@ -1211,15 +1211,15 @@ def dot_product_attention(q,
     # [batch, num_heads, query_length, memory_length]
     if layer is not None and attn_stick is not None:
         if hparams.cov_mode == 'tuzhaopeng':
-            v *= attn_stick[layer]
+            v *= attn_stick
     logits = tf.matmul(q, k, transpose_b=True)
     if bias is not None:
       logits += bias
     weights = tf.nn.softmax(logits, name="attention_weights")
     if layer is not None and attn_stick is not None:
         if hparams.cov_mode == 'stick':
-            weights *= tf.transpose(tf.expand_dims(attn_stick[layer], axis=2), perm=[0,3,2,1])
-            attn_stick[layer] += tf.transpose(tf.reduce_sum(weights, 2), perm=[0,2,1])
+            weights *= tf.transpose(tf.expand_dims(attn_stick, axis=2), perm=[0,3,2,1])
+            attn_stick += tf.transpose(tf.reduce_sum(weights, 2), perm=[0,2,1])
         if hparams.cov_mode == 'tuzhaopeng':
             attn_v = tf.expand_dims(tf.reduce_mean(weights, axis=2), axis=-1) * v
             dim_weight = tf.reduce_mean(attn_v, axis=2)
@@ -1229,7 +1229,7 @@ def dot_product_attention(q,
                                     dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
             dim_weight_trans = tf.nn.conv1d(dim_weight, dim_weight_trans, 1, 'SAME')
             dim_weight_trans = tf.expand_dims(dim_weight_trans, axis=2)
-            attn_stick[layer] += dim_weight_trans
+            attn_stick += dim_weight_trans
 
     # dropping out the attention links for each of the heads
     weights = tf.nn.dropout(weights, 1.0 - dropout_rate)
@@ -1238,7 +1238,7 @@ def dot_product_attention(q,
         "/while/" not in tf.contrib.framework.get_name_scope() and
         make_image_summary):
       attention_image_summary(weights, image_shapes)
-    return tf.matmul(weights, v)
+    return tf.matmul(weights, v), attn_stick
 
 
 def _generate_relative_positions_matrix(length, max_relative_position):
@@ -2373,7 +2373,7 @@ def multihead_attention(query_antecedent,
       if isinstance(x, tuple):
         x, additional_returned_value = x  # Unpack
     elif attention_type == "dot_product":
-      x = dot_product_attention(q, k, v, bias, dropout_rate, image_shapes, attn_stick=attn_stick, layer=layer, hparams=hparams)
+      x, attn_stick = dot_product_attention(q, k, v, bias, dropout_rate, image_shapes, attn_stick=attn_stick, layer=layer, hparams=hparams)
     elif attention_type == "dot_product_relative":
       x = dot_product_attention_relative(q, k, v, bias, max_relative_position,
                                          dropout_rate, image_shapes)
@@ -2394,7 +2394,7 @@ def multihead_attention(query_antecedent,
         x, output_depth, use_bias=False, name="output_transform")
     if additional_returned_value is not None:
       return x, additional_returned_value
-    return x
+    return x, attn_stick
 
 
 def multihead_attention_2d(query_antecedent,

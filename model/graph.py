@@ -44,11 +44,11 @@ class Graph:
         batch_go = [tf.zeros([self.model_config.batch_size, self.model_config.dimension])]
         kword_length = len(kword_input) + 1
         kword_input = tf.stack(batch_go + kword_input, axis=1)
-        kword_output = self.decode_inputs_to_outputs(kword_input, abstr_outputs, abstr_bias, attn_stick)
+        kword_output, new_attn_stick = self.decode_inputs_to_outputs(kword_input, abstr_outputs, abstr_bias, attn_stick)
         kword_output_list = [
             tf.squeeze(d, 1)
             for d in tf.split(kword_output, kword_length, axis=1)]
-        return kword_output_list
+        return kword_output_list, new_attn_stick
 
     def decode_inputs_to_outputs(self, kword_input, abstr_outputs, abstr_bias, attn_stick):
         if self.hparams.pos == 'timing':
@@ -56,10 +56,10 @@ class Graph:
         kword_tribias = common_attention.attention_bias_lower_triangle(tf.shape(kword_input)[1])
         kword_input = tf.nn.dropout(
             kword_input, 1.0 - self.hparams.layer_prepostprocess_dropout)
-        kword_output = transformer.transformer_decoder(
+        kword_output, new_attn_stick = transformer.transformer_decoder(
             kword_input, abstr_outputs, kword_tribias,
             abstr_bias, self.hparams, attn_stick=attn_stick)
-        return kword_output
+        return kword_output, new_attn_stick
 
     def output_to_logit(self, prev_out, w, b):
         prev_logit = tf.add(tf.matmul(prev_out, tf.transpose(w)), b)
@@ -78,25 +78,11 @@ class Graph:
                      [self.model_config.beam_search_size, 1, 1, 1])
              for o in range(self.model_config.batch_size)], axis=0)
 
-        # if attn_stick is not None:
-        #     if self.model_config.cov_mode == 'stick':
-        #         attn_beam_stick = [tf.concat(
-        #             [tf.tile(tf.expand_dims(stick[o, :, :], axis=0),
-        #                      [self.model_config.beam_search_size, 1, 1])
-        #              for o in range(self.model_config.batch_size)], axis=0)
-        #             for stick in attn_stick]
-        #     elif self.model_config.cov_mode == 'tuzhaopeng':
-        #         attn_beam_stick = [tf.concat(
-        #             [tf.tile(tf.expand_dims(stick[o, :, :, :], axis=0),
-        #                      [self.model_config.beam_search_size, 1, 1, 1])
-        #              for o in range(self.model_config.batch_size)], axis=0)
-        #             for stick in attn_stick]
-
         def symbol_to_logits_fn(ids, attn_stick=attn_stick):
             embs = tf.nn.embedding_lookup(emb_kword, ids[:, 1:])
             embs = tf.pad(embs, [[0, 0], [1, 0], [0, 0]])
-            final_outputs = self.decode_inputs_to_outputs(embs, encoder_beam_outputs, encoder_attn_beam_bias, attn_stick=attn_stick)
-            return self.output_to_logit(final_outputs[:, -1, :], proj_w, proj_b)
+            final_outputs, new_attn_stick = self.decode_inputs_to_outputs(embs, encoder_beam_outputs, encoder_attn_beam_bias, attn_stick=attn_stick)
+            return self.output_to_logit(final_outputs[:, -1, :], proj_w, proj_b), new_attn_stick
 
         beam_ids, beam_score, new_attn_stick = beam_search.beam_search(symbol_to_logits_fn,
                                                        tf.zeros([self.model_config.batch_size], tf.int32),
@@ -117,23 +103,6 @@ class Graph:
         return decoder_score, top_beam_ids, new_attn_stick #tf.stack(decoder_target_list, axis=1)
 
     def greed_search(self, id, abstr_outputs, abstr_bias, emb_kword, proj_w, proj_b, attn_stick=None):
-        # kword_target_list = []
-        # kword_logit_list = []
-        # kword_embed_inputs_list = []
-        # kword_output_list = []
-        # for step in range(self.model_config.max_kword_len):
-        #     if step > 0:
-        #         tf.get_variable_scope().reuse_variables()
-        #     kword_output_list = self.decode_step(
-        #         kword_embed_inputs_list, abstr_outputs, abstr_bias, attn_stick=attn_stick)
-        #     last_logit_list = self.output_to_logit(kword_output_list[-1], proj_w, proj_b)
-        #     last_target_list = tf.argmax(last_logit_list, output_type=tf.int32, axis=-1)
-        #     kword_logit_list.append(last_logit_list)
-        #     kword_target_list.append(last_target_list)
-        #     kword_embed_inputs_list.append(self.embedding_fn(last_target_list, emb_kword))
-        #
-        # return tf.constant(10.0), tf.stack(kword_target_list, axis=1)
-
         kword_target_tensor = tf.TensorArray(tf.int64, size=self.model_config.max_kword_len,
                                              clear_after_read=False,
                                              element_shape=[self.model_config.batch_size, ],
@@ -224,20 +193,14 @@ class Graph:
                 encoder_embed_inputs, abstr_bias, self.hparams)
 
             if self.model_config.cov_mode == 'stick':
-                attn_stick = [tf.ones(
+                attn_stick = tf.ones(
                     [self.model_config.batch_size, self.model_config.max_abstr_len, self.model_config.num_heads],
-                    tf.float32, 'attn_stick_l%s' % i)
-                    for i in range(self.model_config.num_decoder_layers)]
+                    tf.float32, 'attn_stick')
             elif self.model_config.cov_mode == 'tuzhaopeng':
                 attn_stick = tf.ones(
                     [self.model_config.batch_size, self.model_config.num_heads, 1,
                      self.model_config.dimension / self.model_config.num_heads],
-                    tf.float32, 'attn_memory_l%s' % i)
-                # attn_stick = tf.ones(
-                #     [self.model_config.num_encoder_layers, self.model_config.batch_size,
-                #      self.model_config.num_heads, 1,
-                #      self.model_config.dimension / self.model_config.num_heads],
-                #     tf.float32, 'attn_memory')
+                    tf.float32, 'attn_memory')
 
         losses = []
         targets = []
@@ -247,10 +210,11 @@ class Graph:
                 if self.is_train:
                     kword = kwords[kword_idx][:-1]
                     kword_ph = kwords_ph[kword_idx]
-                    kword_output_list = self.decode_step(kword, abstr_outputs, abstr_bias, attn_stick)
+                    kword_output_list, new_attn_stick = self.decode_step(kword, abstr_outputs, abstr_bias, attn_stick)
                     kword_logit_list = [self.output_to_logit(o, proj_w, proj_b) for o in kword_output_list]
                     kword_target_list = [tf.argmax(o, output_type=tf.int32, axis=-1)
                                            for o in kword_logit_list]
+                    attn_stick = new_attn_stick
 
                     if self.model_config.number_samples > 0:
                         loss_fn = tf.nn.sampled_softmax_loss
@@ -281,8 +245,7 @@ class Graph:
                             dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
                         target_emb = tf.nn.conv1d(target_emb, target_emb_trans, 1, 'SAME')
                         target_emb = tf.expand_dims(target_emb, axis=2)
-                        for attn_stick_i in range(len(attn_stick)):
-                            attn_stick[attn_stick_i] += target_emb
+                        attn_stick += target_emb
                     losses.append(loss)
                 else:
                     loss, target, new_attn_stick = self.transformer_beam_search(
@@ -294,6 +257,19 @@ class Graph:
                     targets.append(target)
                     losses = loss
                     attn_stick = new_attn_stick
+                    if self.model_config.cov_mode == 'tuzhaopeng':
+                        target.set_shape([self.model_config.batch_size, self.model_config.max_kword_len])
+                        target_list = tf.unstack(target, axis=1)
+                        target_emb = tf.stack(self.embedding_fn(target_list, emb_kword), axis=1)
+                        target_emb = common_attention.split_heads(target_emb, self.model_config.num_heads)
+                        target_emb = tf.reduce_mean(target_emb, axis=2)
+                        target_emb_trans = tf.get_variable(
+                            'dim_weight_trans',
+                            shape=[1, target_emb.get_shape()[-1].value, target_emb.get_shape()[-1].value],
+                            dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+                        target_emb = tf.nn.conv1d(target_emb, target_emb_trans, 1, 'SAME')
+                        target_emb = tf.expand_dims(target_emb, axis=2)
+                        attn_stick += target_emb
                 tf.get_variable_scope().reuse_variables()
         if targets:
             obj['targets'] = tf.stack(targets, axis=1)

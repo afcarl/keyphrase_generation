@@ -108,11 +108,11 @@ args = get_args()
 
 class DummyConfig():
     warm_start = args.warm_start
-    output_folder = 'tmp_subword'
+    output_folder = args.output_folder
     subword_vocab_size = 1
     min_count = args.min_count
     num_gpus = args.num_gpus
-    dimension = 150
+    dimension = 50
     batch_size = 2
     eval_mode = args.eval_mode
     cov_mode = args.cov_mode
@@ -122,10 +122,10 @@ class DummyConfig():
     learning_rate = 0.001
     optimizer = args.optimizer
     max_grad_norm = 4.0
-    num_heads = args.num_heads
-    num_hidden_layers = args.num_hidden_layers
-    num_encoder_layers = args.num_encoder_layers
-    num_decoder_layers = args.num_decoder_layers
+    num_heads = 2
+    num_hidden_layers = 2
+    num_encoder_layers = 2
+    num_decoder_layers = 2
     hparams_pos = args.hparams_pos
     layer_prepostprocess_dropout = 0.0
 
@@ -141,9 +141,9 @@ class DummyConfig():
     if subword_vocab_size > 0:
         path_abstr_voc = get_path('data/dummy_abstr.subvoc', 'sys')
         path_kword_voc = get_path('data/dummy_kword.subvoc', 'sys')
-        max_kword_len = 30
+        max_kword_len = 15
         max_abstr_len = 100
-        max_cnt_kword = 20
+        max_cnt_kword = 5
     else:
         path_abstr_voc = get_path('data/dummy_abstr.voc', 'sys')
         path_kword_voc = get_path('data/dummy_kword.voc', 'sys')

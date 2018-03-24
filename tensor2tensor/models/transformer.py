@@ -490,7 +490,7 @@ def transformer_encoder(encoder_input,
                         hparams.num_hidden_layers):
       with tf.variable_scope("layer_%d" % layer):
         with tf.variable_scope("self_attention"):
-          y = common_attention.multihead_attention(
+          y, _ = common_attention.multihead_attention(
               common_layers.layer_preprocess(x, hparams),
               None,
               encoder_self_attention_bias,
@@ -546,7 +546,7 @@ def transformer_decoder(decoder_input,
       layer_cache = cache[layer_name] if cache is not None else None
       with tf.variable_scope(layer_name):
         with tf.variable_scope("self_attention"):
-          y = common_attention.multihead_attention(
+          y, _ = common_attention.multihead_attention(
               common_layers.layer_preprocess(x, hparams),
               None,
               decoder_self_attention_bias,
@@ -565,7 +565,7 @@ def transformer_decoder(decoder_input,
             # attention_type = "dot_product"
             # if hparams.cov_mode == 'tuzhaopeng':
             #     attention_type = "dot_product"
-            y = common_attention.multihead_attention(
+            y, attn_stick = common_attention.multihead_attention(
                 common_layers.layer_preprocess(
                     x, hparams), encoder_output, encoder_decoder_attention_bias,
                 hparams.attention_key_channels or hparams.hidden_size,
@@ -582,7 +582,7 @@ def transformer_decoder(decoder_input,
     # if normalization is done in layer_preprocess, then it shuold also be done
     # on the output, since the output can grow very large, being the sum of
     # a whole stack of unnormalized layer outputs.
-    return common_layers.layer_preprocess(x, hparams)
+    return common_layers.layer_preprocess(x, hparams), attn_stick
 
 
 def transformer_ffn_layer(x,

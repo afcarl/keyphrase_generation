@@ -98,11 +98,11 @@ def eval(model_config, ckpt):
         # span = e_time - s_time
         # print('%s' % (str(span)))
     format = '%.4f'
-    file_name = ''.join(['step', str(step),
-                         'f1top10', str(format % np.mean(f1_top10s)), 'f1top5', str(format % np.mean(f1_top5s)),
-                         'prectop10', str(format % np.mean(prec_top10s)), 'prectop5', str(format % np.mean(prec_top5s)),
-                         'recalltop10', str(format % np.mean(recall_top10s)), 'recalltop5', str(format % np.mean(recall_top5s)),
-                         'perplexity', str(np.mean(perplexitys))
+    file_name = ''.join(['step_', str(step),
+                         'f1top10_', str(format % np.mean(f1_top10s)), 'f1top5_', str(format % np.mean(f1_top5s)),
+                         'prectop10_', str(format % np.mean(prec_top10s)), 'prectop5_', str(format % np.mean(prec_top5s)),
+                         'recalltop10_', str(format % np.mean(recall_top10s)), 'recalltop5_', str(format % np.mean(recall_top5s)),
+                         'perplexity_', str(np.mean(perplexitys))
                          ])
     if not exists(model_config.resultdir):
         mkdir(model_config.resultdir)

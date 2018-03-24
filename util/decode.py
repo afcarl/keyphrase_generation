@@ -6,7 +6,7 @@ def decode_keyphrases(target, evaldata, model_config, topk=10):
     keyphrases = []
     bos_id = evaldata.voc_kword.encode('#bos#')[0]
     eos_id = evaldata.voc_kword.encode('#eos#')[0]
-    assert topk < len(target)
+    # assert topk < len(target)
     for i in range(len(target)):
         if model_config.subword_vocab_size > 0:
             keyphrase = decode_keyphrase(target[i], evaldata, model_config, bos_id, eos_id)
