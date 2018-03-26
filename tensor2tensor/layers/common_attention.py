@@ -1210,17 +1210,14 @@ def dot_product_attention(q,
       name, default_name="dot_product_attention", values=[q, k, v]):
     # [batch, num_heads, query_length, memory_length]
     if layer is not None and attn_stick is not None:
-        if hparams.cov_mode == 'tuzhaopeng':
+        if 'tuzhaopeng' in hparams.cov_mode:
             v *= attn_stick
     logits = tf.matmul(q, k, transpose_b=True)
     if bias is not None:
       logits += bias
     weights = tf.nn.softmax(logits, name="attention_weights")
     if layer is not None and attn_stick is not None:
-        if hparams.cov_mode == 'stick':
-            weights *= tf.transpose(tf.expand_dims(attn_stick, axis=2), perm=[0,3,2,1])
-            attn_stick += tf.transpose(tf.reduce_sum(weights, 2), perm=[0,2,1])
-        if hparams.cov_mode == 'tuzhaopeng':
+        if 'tuzhaopeng' in hparams.cov_mode and 'wd_attn' in hparams.cov_mode:
             attn_v = tf.expand_dims(tf.reduce_mean(weights, axis=2), axis=-1) * v
             dim_weight = tf.reduce_mean(attn_v, axis=2)
 

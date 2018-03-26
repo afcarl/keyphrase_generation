@@ -51,7 +51,7 @@ def find_best_ckpt(model_config):
         files = listdir(dir)
         max_id = -1
         for file in files:
-            if file.startswith('model.ckpt-'):
+            if file.startswith('model.ckpt-') and file.endswith('.meta'):
                 sid = file.index('model.ckpt-') + len('model.ckpt-')
                 eid = file.rindex('.')
                 id = int(file[sid:eid])
@@ -131,6 +131,6 @@ def train(model_config):
 
 if __name__ == '__main__':
     from model.model_config import DefaultConfig, DummyConfig
-    model_config = DummyConfig()
+    model_config = DefaultConfig()
     print(list_config(model_config))
     train(model_config)

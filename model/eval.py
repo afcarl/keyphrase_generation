@@ -127,12 +127,12 @@ def get_ckpt(modeldir, logdir, wait_second=60):
 
 if __name__ == '__main__':
     from model.model_config import DefaultConfig, DefaultValConfig, DefaultTestConfig, DummyConfig
-    model_config = DummyConfig()
+    model_config = DefaultConfig()
     while True:
         ckpt = get_ckpt(model_config.modeldir, model_config.logdir)
         if ckpt:
             if model_config.eval_mode == 'none':
-                f1 = eval(DummyConfig(), ckpt)
+                f1 = eval(DefaultValConfig(), ckpt)
             elif model_config.eval_mode == 'truncate2000':
                 f1 = eval(DefaultValConfig(), ckpt)
                 # eval(DefaultTestConfig(), ckpt)

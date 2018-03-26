@@ -105,7 +105,7 @@ def compute_batch_indices(batch_size, beam_size):
 
 def compute_topk_scores_and_seq(sequences, scores, scores_to_gather, flags,
                                 beam_size, batch_size, prefix="default",
-                                states_to_gather=None, curr_finished_attn_stick=None):
+                                states_to_gather=None):
   """Given sequences and scores, will gather the top k=beam size sequences.
 
   This function is used to grow alive, and finished. It takes sequences,
@@ -161,15 +161,12 @@ def compute_topk_scores_and_seq(sequences, scores, scores_to_gather, flags,
   topk_seq = gather(sequences, "_topk_seq")
   topk_flags = gather(flags, "_topk_flags")
   topk_gathered_scores = gather(scores_to_gather, "_topk_scores")
-  topk_attn_stick = tf.zeros([1,1])
-  if curr_finished_attn_stick is not None:
-    topk_attn_stick = gather(curr_finished_attn_stick, "_topk_attn_stick")
   if states_to_gather:
     topk_gathered_states = nest.map_structure(
         lambda state: gather(state, "_topk_states"), states_to_gather)
   else:
     topk_gathered_states = states_to_gather
-  return topk_seq, topk_gathered_scores, topk_flags, topk_gathered_states, topk_attn_stick
+  return topk_seq, topk_gathered_scores, topk_flags, topk_gathered_states
 
 
 def beam_search(symbols_to_logits_fn,
@@ -180,9 +177,7 @@ def beam_search(symbols_to_logits_fn,
                 alpha,
                 states=None,
                 eos_id=EOS_ID,
-                stop_early=True,
-                attn_stick=None,
-                model_config=None):
+                stop_early=True):
   """Beam search with length penalties.
 
   Requires a function that can take the currently decoded sybmols and return
@@ -244,17 +239,12 @@ def beam_search(symbols_to_logits_fn,
   # Finished log probs will be negative infinity in the beginning
   # finished_flags will keep track of booleans
   finished_seq = tf.zeros(common_layers.shape_list(alive_seq), tf.int32)
-  finished_attn_stick = tf.zeros(
-      [model_config.batch_size, model_config.beam_search_size,
-       model_config.num_heads, 1, model_config.dimension/model_config.num_heads],
-      tf.float32)
   # Setting the scores of the initial to negative infinity.
   finished_scores = tf.ones([batch_size, beam_size]) * -INF
   finished_flags = tf.zeros([batch_size, beam_size], tf.bool)
 
   def grow_finished(finished_seq, finished_scores, finished_flags, curr_seq,
-                    curr_scores, curr_finished,
-                    attn_stick=None, finished_attn_stick=None):
+                    curr_scores, curr_finished):
     """Given sequences and scores, will gather the top k=beam size sequences.
 
     Args:
@@ -286,18 +276,13 @@ def beam_search(symbols_to_logits_fn,
     curr_scores += (1. - tf.to_float(curr_finished)) * -INF
     # concatenating the sequences and scores along beam axis
     curr_finished_seq = tf.concat([finished_seq, curr_seq], axis=1)
-    curr_finished_attn_stick = None
-    if attn_stick is not None:
-        curr_finished_attn_stick = tf.concat([finished_attn_stick, attn_stick], axis=1)
     curr_finished_scores = tf.concat([finished_scores, curr_scores], axis=1)
     curr_finished_flags = tf.concat([finished_flags, curr_finished], axis=1)
     return compute_topk_scores_and_seq(
         curr_finished_seq, curr_finished_scores, curr_finished_scores,
-        curr_finished_flags, beam_size, batch_size, "grow_finished",
-        curr_finished_attn_stick=curr_finished_attn_stick)
+        curr_finished_flags, beam_size, batch_size, "grow_finished")
 
-  def grow_alive(curr_seq, curr_scores, curr_log_probs, curr_finished, states,
-                 attn_stick=None):
+  def grow_alive(curr_seq, curr_scores, curr_log_probs, curr_finished, states):
     """Given sequences and scores, will gather the top k=beam size sequences.
 
     Args:
@@ -320,9 +305,9 @@ def beam_search(symbols_to_logits_fn,
     curr_scores += tf.to_float(curr_finished) * -INF
     return compute_topk_scores_and_seq(curr_seq, curr_scores, curr_log_probs,
                                        curr_finished, beam_size, batch_size,
-                                       "grow_alive", states, curr_finished_attn_stick=attn_stick)
+                                       "grow_alive", states)
 
-  def grow_topk(i, alive_seq, alive_log_probs, states, attn_stick=None):
+  def grow_topk(i, alive_seq, alive_log_probs, states):
     r"""Inner beam seach loop.
 
     This function takes the current alive sequences, and grows them to topk
@@ -358,14 +343,7 @@ def beam_search(symbols_to_logits_fn,
       states = nest.map_structure(
           lambda t: _unmerge_beam_dim(t, batch_size, beam_size), flat_states)
     else:
-      if attn_stick is not None:
-          flat_attn_stick = tf.reshape(
-                    attn_stick, [batch_size * beam_size, model_config.num_heads, 1, model_config.dimension//model_config.num_heads])
-          flat_logits, new_attn_stick = symbols_to_logits_fn(flat_ids, cur_attn_stick=flat_attn_stick)
-          new_attn_stick = tf.reshape(
-                    attn_stick, [batch_size, beam_size, model_config.num_heads, 1, model_config.dimension//model_config.num_heads])
-      else:
-          flat_logits, new_attn_stick = symbols_to_logits_fn(flat_ids)
+      flat_logits, _ = symbols_to_logits_fn(flat_ids)
     logits = tf.reshape(flat_logits, [batch_size, beam_size, -1])
 
     # Convert logits to normalized log probs
@@ -401,7 +379,7 @@ def beam_search(symbols_to_logits_fn,
     # last dimension contains the i,j gathering coordinates.
     topk_coordinates = tf.stack([batch_pos, topk_beam_index], axis=2)
 
-    # Gather up the most probablze 2*beams both for the ids and finished_in_alive
+    # Gather up the most probable 2*beams both for the ids and finished_in_alive
     # bools
     topk_seq = tf.gather_nd(alive_seq, topk_coordinates)
     if states:
@@ -413,14 +391,10 @@ def beam_search(symbols_to_logits_fn,
 
     topk_finished = tf.equal(topk_ids, eos_id)
 
-    top_attn_stick = None
-    if attn_stick is not None:
-        top_attn_stick = tf.gather_nd(new_attn_stick, topk_coordinates)
-
-    return topk_seq, topk_log_probs, topk_scores, topk_finished, states, top_attn_stick
+    return topk_seq, topk_log_probs, topk_scores, topk_finished, states
 
   def inner_loop(i, alive_seq, alive_log_probs, finished_seq, finished_scores,
-                 finished_flags, states, attn_stick, finished_attn_stick):
+                 finished_flags, states):
     """Inner beam seach loop.
 
     There are three groups of tensors, alive, finished, and topk.
@@ -469,24 +443,19 @@ def beam_search(symbols_to_logits_fn,
     # 1. Get the current topk items.
     # 2. Extract the ones that have finished and haven't finished
     # 3. Recompute the contents of finished based on scores.
-    topk_seq, topk_log_probs, topk_scores, topk_finished, states, topk_attn_stick = grow_topk(
-        i, alive_seq, alive_log_probs, states, attn_stick=attn_stick)
-    alive_seq, alive_log_probs, _, states, alive_attn_stick = grow_alive(
-        topk_seq, topk_scores, topk_log_probs, topk_finished, states, attn_stick=topk_attn_stick)
-    finished_seq, finished_scores, finished_flags, _, finished_attn_stick = grow_finished(
+    topk_seq, topk_log_probs, topk_scores, topk_finished, states = grow_topk(
+        i, alive_seq, alive_log_probs, states)
+    alive_seq, alive_log_probs, _, states = grow_alive(
+        topk_seq, topk_scores, topk_log_probs, topk_finished, states)
+    finished_seq, finished_scores, finished_flags, _ = grow_finished(
         finished_seq, finished_scores, finished_flags, topk_seq, topk_scores,
-        topk_finished, attn_stick=topk_attn_stick, finished_attn_stick=finished_attn_stick)
+        topk_finished)
 
-    alive_attn_stick.set_shape((model_config.batch_size, model_config.beam_search_size,
-                                   model_config.num_heads, 1, model_config.dimension / model_config.num_heads))
-    finished_attn_stick.set_shape((model_config.batch_size, model_config.beam_search_size,
-                                   model_config.num_heads, 1, model_config.dimension/model_config.num_heads))
     return (i + 1, alive_seq, alive_log_probs, finished_seq, finished_scores,
-            finished_flags, states, alive_attn_stick, finished_attn_stick)
+            finished_flags, states)
 
   def _is_finished(i, unused_alive_seq, alive_log_probs, unused_finished_seq,
-                   finished_scores, finished_in_finished, unused_states,
-                   attn_stick, finished_attn_stick):
+                   finished_scores, finished_in_finished, unused_states):
     """Checking termination condition.
 
     We terminate when we decoded up to decode_length or the lowest scoring item
@@ -531,11 +500,11 @@ def beam_search(symbols_to_logits_fn,
         tf.less(i, decode_length), tf.logical_not(bound_is_met))
 
   (_, alive_seq, alive_log_probs, finished_seq, finished_scores,
-   finished_flags, _, attn_stick, finished_attn_stick) = tf.while_loop(
+   finished_flags, _) = tf.while_loop(
        _is_finished,
        inner_loop, [
            tf.constant(0), alive_seq, alive_log_probs, finished_seq,
-           finished_scores, finished_flags, states, attn_stick, finished_attn_stick
+           finished_scores, finished_flags, states
        ],
        shape_invariants=[
            tf.TensorShape([]),
@@ -546,8 +515,6 @@ def beam_search(symbols_to_logits_fn,
            finished_flags.get_shape(),
            nest.map_structure(
                lambda tensor: tf.TensorShape(tensor.shape), states),
-           attn_stick.get_shape(),
-           finished_attn_stick.get_shape()
        ],
        parallel_iterations=1,
        back_prop=False)
@@ -564,4 +531,4 @@ def beam_search(symbols_to_logits_fn,
       tf.reduce_any(finished_flags, 1), finished_seq, alive_seq)
   finished_scores = tf.where(
       tf.reduce_any(finished_flags, 1), finished_scores, alive_log_probs)
-  return finished_seq, finished_scores, attn_stick
+  return finished_seq, finished_scores

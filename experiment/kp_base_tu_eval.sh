@@ -15,4 +15,4 @@
 module restore
 
 # Run the job
-srun python ../model/eval.py -cmode tuzhaopeng --eval_mode truncate2000 -ngpus 1 -bsize 50 -beam 1 -lr 0.0001 --output_folder kp_base_tu --max_kword_len 30 --max_abstr_len 1000 --max_cnt_kword 50 -env crc
+srun python ../model/eval.py -cmode tuzhaopeng:wd_attn:kp_attn -ngpus 1 --eval_mode truncate2000 -bsize 35 -beam 1 -lr 0.0001 --output_folder kp_base_tu2 --max_kword_len 50 --max_abstr_len 1200 --max_cnt_kword 100 -env crc

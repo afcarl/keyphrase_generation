@@ -2,6 +2,7 @@ import tensorflow as tf
 from tensor2tensor.layers import common_attention, common_layers
 from tensor2tensor.models import transformer
 from tensor2tensor.utils import beam_search
+from tensor2tensor.utils import beam_search_t2t
 
 from util import constant
 from model.loss import sequence_loss
@@ -78,20 +79,43 @@ class Graph:
                      [self.model_config.beam_search_size, 1, 1, 1])
              for o in range(self.model_config.batch_size)], axis=0)
 
-        def symbol_to_logits_fn(ids, attn_stick=attn_stick):
+        if attn_stick is not None and 'tuzhaopeng' in self.model_config.cov_mode and (
+                    'wd_attn' in self.model_config.cov_mode and 'kp_attn' in self.model_config.cov_mode):
+            attn_beam_stick = tf.stack(
+                [attn_stick for _ in range(self.model_config.beam_search_size)],
+                axis=1)
+        elif attn_stick is not None and 'tuzhaopeng' in self.model_config.cov_mode and 'kp_attn' in self.model_config.cov_mode:
+            attn_beam_stick = tf.concat(
+                [tf.tile(tf.expand_dims(attn_stick[o, :, :, :], axis=0),
+                         [self.model_config.beam_search_size, 1, 1, 1])
+                 for o in range(self.model_config.batch_size)], axis=0)
+
+        def symbol_to_logits_fn(ids, cur_attn_stick=None):
             embs = tf.nn.embedding_lookup(emb_kword, ids[:, 1:])
             embs = tf.pad(embs, [[0, 0], [1, 0], [0, 0]])
-            final_outputs, new_attn_stick = self.decode_inputs_to_outputs(embs, encoder_beam_outputs, encoder_attn_beam_bias, attn_stick=attn_stick)
+            if attn_stick is not None and 'tuzhaopeng' in self.model_config.cov_mode and (
+                    'wd_attn' in self.model_config.cov_mode and 'kp_attn' in self.model_config.cov_mode):
+                final_outputs, new_attn_stick = self.decode_inputs_to_outputs(
+                    embs, encoder_beam_outputs, encoder_attn_beam_bias, attn_stick=cur_attn_stick)
+            elif attn_stick is not None and 'tuzhaopeng' in self.model_config.cov_mode and 'kp_attn' in self.model_config.cov_mode:
+                final_outputs, new_attn_stick = self.decode_inputs_to_outputs(
+                    embs, encoder_beam_outputs, encoder_attn_beam_bias, attn_stick=attn_beam_stick)
             return self.output_to_logit(final_outputs[:, -1, :], proj_w, proj_b), new_attn_stick
 
-        beam_ids, beam_score, new_attn_stick = beam_search.beam_search(symbol_to_logits_fn,
-                                                       tf.zeros([self.model_config.batch_size], tf.int32),
-                                                       self.model_config.beam_search_size,
-                                                       self.model_config.max_kword_len,
-                                                       self.voc_kword.vocab_size(),
-                                                       0.6,
-                                                       attn_stick=attn_stick
-                                                       )
+        if attn_stick is not None and 'tuzhaopeng' in self.model_config.cov_mode and 'wd_attn' in self.model_config.cov_mode:
+                beam_ids, beam_score, new_attn_stick = beam_search.beam_search(
+                    symbol_to_logits_fn, tf.zeros([self.model_config.batch_size], tf.int32),
+                    self.model_config.beam_search_size, self.model_config.max_kword_len,
+                    self.voc_kword.vocab_size(), 0.6,
+                    attn_stick=attn_beam_stick, model_config=self.model_config)
+                new_attn_stick = new_attn_stick[:, 0, :]
+        else:
+            beam_ids, beam_score = beam_search_t2t.beam_search(
+                symbol_to_logits_fn, tf.zeros([self.model_config.batch_size], tf.int32),
+                self.model_config.beam_search_size, self.model_config.max_kword_len,
+                self.voc_kword.vocab_size(), 0.6)
+            new_attn_stick = attn_stick
+
         top_beam_ids = beam_ids[:, 0, 1:]
         top_beam_ids = tf.pad(top_beam_ids,
                               [[0, 0],
@@ -100,7 +124,7 @@ class Graph:
                                for d in tf.split(top_beam_ids, self.model_config.max_kword_len, axis=1)]
         decoder_score = -beam_score[:, 0] / tf.to_float(tf.shape(top_beam_ids)[1])
 
-        return decoder_score, top_beam_ids, new_attn_stick #tf.stack(decoder_target_list, axis=1)
+        return decoder_score, top_beam_ids, new_attn_stick
 
     def greed_search(self, id, abstr_outputs, abstr_bias, emb_kword, proj_w, proj_b, attn_stick=None):
         kword_target_tensor = tf.TensorArray(tf.int64, size=self.model_config.max_kword_len,
@@ -192,11 +216,7 @@ class Graph:
             abstr_outputs = transformer.transformer_encoder(
                 encoder_embed_inputs, abstr_bias, self.hparams)
 
-            if self.model_config.cov_mode == 'stick':
-                attn_stick = tf.ones(
-                    [self.model_config.batch_size, self.model_config.max_abstr_len, self.model_config.num_heads],
-                    tf.float32, 'attn_stick')
-            elif self.model_config.cov_mode == 'tuzhaopeng':
+            if 'tuzhaopeng' in self.model_config.cov_mode:
                 attn_stick = tf.ones(
                     [self.model_config.batch_size, self.model_config.num_heads, 1,
                      self.model_config.dimension / self.model_config.num_heads],
@@ -235,7 +255,7 @@ class Graph:
                                          )
                     targets.append(tf.stack(kword_target_list, axis=1))
 
-                    if self.model_config.cov_mode == 'tuzhaopeng':
+                    if 'tuzhaopeng' in self.model_config.cov_mode and 'kp_attn' in self.model_config.cov_mode:
                         target_emb = tf.stack(self.embedding_fn(kword_target_list, emb_kword), axis=1)
                         target_emb = common_attention.split_heads(target_emb, self.model_config.num_heads)
                         target_emb = tf.reduce_mean(target_emb, axis=2)
@@ -248,16 +268,18 @@ class Graph:
                         attn_stick += target_emb
                     losses.append(loss)
                 else:
-                    loss, target, new_attn_stick = self.transformer_beam_search(
-                        abstr_outputs, abstr_bias, emb_kword, proj_w, proj_b,
-                        attn_stick=attn_stick)
-                    # loss, target, new_attn_stick = self.greed_search(kword_idx,
-                    #     abstr_outputs, abstr_bias, emb_kword, proj_w, proj_b,
-                    #     attn_stick=attn_stick)
+                    if self.model_config.beam_search_size > 0:
+                        loss, target, new_attn_stick = self.transformer_beam_search(
+                            abstr_outputs, abstr_bias, emb_kword, proj_w, proj_b,
+                            attn_stick=attn_stick)
+                    else:
+                        loss, target, new_attn_stick = self.greed_search(kword_idx,
+                            abstr_outputs, abstr_bias, emb_kword, proj_w, proj_b,
+                            attn_stick=attn_stick)
                     targets.append(target)
                     losses = loss
                     attn_stick = new_attn_stick
-                    if self.model_config.cov_mode == 'tuzhaopeng':
+                    if 'tuzhaopeng' in self.model_config.cov_mode and 'kp_attn' in self.model_config.cov_mode:
                         target.set_shape([self.model_config.batch_size, self.model_config.max_kword_len])
                         target_list = tf.unstack(target, axis=1)
                         target_emb = tf.stack(self.embedding_fn(target_list, emb_kword), axis=1)

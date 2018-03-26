@@ -12,6 +12,8 @@ def get_args():
                         help='The environment machine?')
     parser.add_argument('-out', '--output_folder', default='tmp',
                         help='Output folder?')
+    parser.add_argument('-result', '--result_folder', default='result_val',
+                        help='Result folder?')
     parser.add_argument('-warm', '--warm_start', default='',
                         help='Path for warm start checkpoint?')
     parser.add_argument('-upr', '--use_partial_restore', default=True, type=bool,
@@ -79,6 +81,8 @@ def get_args():
     # For Test
     parser.add_argument('-test_ckpt', '--test_ckpt', default='',
                         help='Path for test ckpt checkpoint?')
+    parser.add_argument('-beam_search_strategy', '--beam_search_strategy', default='',
+                        help='Beam search Mode?')
 
 
     args = parser.parse_args()
@@ -116,6 +120,7 @@ class DummyConfig():
     batch_size = 2
     eval_mode = args.eval_mode
     cov_mode = args.cov_mode
+    cov_mode = cov_mode.split(':')
 
     beam_search_size = args.beam_search_size
     number_samples = args.number_samples
@@ -150,6 +155,7 @@ class DummyConfig():
         max_kword_len = 5
         max_abstr_len = 10
         max_cnt_kword = 20
+    beam_search_strategy = args.beam_search_strategy
 
 
 class DefaultConfig(DummyConfig):
@@ -169,44 +175,44 @@ class DefaultConfig(DummyConfig):
     num_decoder_layers = args.num_decoder_layers
     layer_prepostprocess_dropout = args.layer_prepostprocess_dropout
     path_train_json = get_path(
-        '../keyphrase_data/kp20k/ke20k_training.processed.json', 'sys')
+        '../keyphrase_data/kp20k2/ke20k_training.processed.json', 'sys')
     path_val_json = get_path(
-        '../keyphrase_data/kp20k/ke20k_validation.processed.json', 'sys')
+        '../keyphrase_data/kp20k2/ke20k_validation.processed.json', 'sys')
     path_test_json = get_path(
-        '../keyphrase_data/kp20k/ke20k_testing.processed.json', 'sys')
+        '../keyphrase_data/kp20k2/ke20k_testing.processed.json', 'sys')
     path_abstr_voc = get_path(
-        '../keyphrase_data/kp20k/abstr.subvoc', 'sys')
+        '../keyphrase_data/kp20k2/abstr.subvoc', 'sys')
     path_kword_voc = get_path(
-        '../keyphrase_data/kp20k/kword.subvoc', 'sys')
+        '../keyphrase_data/kp20k2/kword.subvoc', 'sys')
 
 
 class DefaultValConfig(DefaultConfig):
-    max_cnt_kword = 20
     output_folder = args.output_folder
+    result_folder = args.result_folder
     path_val_json = get_path(
         '../keyphrase_data/kp20k/ke20k_validation.processed.json', 'sys')
-    resultdir = get_path('../' + output_folder + '/result_val/', args.environment)
+    resultdir = get_path('../' + output_folder + '/' + result_folder + '/', args.environment)
 
 class DefaultTestConfig(DefaultConfig):
-    max_cnt_kword = 20
     output_folder = args.output_folder
+    result_folder = args.result_folder
     path_val_json = get_path(
         '../keyphrase_data/kp20k/ke20k_testing.processed.json', 'sys')
-    resultdir = get_path('../' + output_folder + '/result_test/', args.environment)
+    resultdir = get_path('../' + output_folder + '/' + result_folder +'/', args.environment)
 
-class DefaultTestTruncated2000Config(DefaultConfig):
-    eval_mode = 'truncate2000'
-    beam_search_size = 200
-    output_folder = args.output_folder
-    path_val_json = get_path(
-        '../keyphrase_data/kp20k/ke20k_testing.processed.json', 'sys')
-    resultdir = get_path('../' + output_folder + '/result_test_truncate2000/', args.environment)
-
-class DefaultValTruncated2000Config(DefaultConfig):
-    eval_mode = 'truncate2000'
-    beam_search_size = 200
-    output_folder = args.output_folder
-    path_val_json = get_path(
-        '../keyphrase_data/kp20k/ke20k_validation.processed.json', 'sys')
-    resultdir = get_path('../' + output_folder + '/result_val_truncate2000/', args.environment)
+# class DefaultTestTruncated2000Config(DefaultConfig):
+#     eval_mode = 'truncate2000'
+#     beam_search_size = 200
+#     output_folder = args.output_folder
+#     path_val_json = get_path(
+#         '../keyphrase_data/kp20k/ke20k_testing.processed.json', 'sys')
+#     resultdir = get_path('../' + output_folder + '/result_test_truncate2000/', args.environment)
+#
+# class DefaultValTruncated2000Config(DefaultConfig):
+#     eval_mode = 'truncate2000'
+#     beam_search_size = 200
+#     output_folder = args.output_folder
+#     path_val_json = get_path(
+#         '../keyphrase_data/kp20k/ke20k_validation.processed.json', 'sys')
+#     resultdir = get_path('../' + output_folder + '/result_val_truncate2000/', args.environment)
 
